@@ -1,0 +1,318 @@
+#!/usr/bin/python
+
+'''
+        Pushover.py
+
+        License:
+        This work is licensed under a Creative Commons Attribution-ShareAlike 3.0 Unported License.
+        http://creativecommons.org/licenses/by-sa/3.0/deed.en_US
+        
+        What it does:
+        Send push notification requests to Pushover.
+
+        Can be used as either a module or as a command-line tool.
+        This is a very simple implementation of the Pushover v1 API. It doesn't do anything fancy, such as
+        monitor high-priority notification receipts.
+
+        I am not a professional, but merely a hobbyist. The code, I'm sure, isn't deployment-quality but it
+        works. I mainly wrote it to send my phone notifications when certain tasks on my machine have finished.
+
+        Module usage:
+                import pushover
+
+                po = Pushover("Application Token", "User Token", echo = True/False)
+
+                po.send(device = You device (optional),
+                        sound = "Select a notification sound (optional)",
+                        priority = "Priority level (optional)",
+                        title = "Notification title (optional)",
+                        message = "Notification message (required)",
+                        url = "Send a link with the notification (optional)",
+                        url_title = "Human-readable text to assing to link (optional)")
+                        
+                If request was sent successfully, the method will return True (if echo is enabled, it will print
+                "Notification sent successfully"
+
+        CLI usage:
+                Just type -h or --help for instructions.
+                
+'''
+
+
+import httplib
+import urllib
+import json
+
+
+URL = { 'base' : u'api.pushover.net:443',
+        'vald' : u'/1/users/validate.json',
+        'send' : u'/1/messages.json' }
+
+
+class Pushover:
+        def __init__(self, app_token, user_token, echo = False):
+                self.APP_TOKEN = app_token
+                self.USER_TOKEN = user_token
+
+                self.ECHO = echo
+
+
+        '''
+                _echo(msg)
+
+                Arguments:
+                        msg - The message to print
+
+                Returns:
+                        String
+
+                _echo will print a given message if the object has been called with echo turned on.
+        '''
+        def _echo(self, msg):
+                if self.ECHO: print msg
+
+
+        '''
+                _trim(incoming, length)
+
+                Arguments:
+                        incoming - Incoming string that needs to be ananlyzed and trimmed if
+                        necessary.
+
+                        length - Maximum length a string can be.
+
+                Returns:
+                        String
+
+                Pushover has certain requirements for string length (titles can only be 50 characters, messages
+                can be 512, etc.) _trim is called to make sure strings are in spec, and if they're too long, they're
+                truncated and have a "..." append for looks.
+        '''
+        def _trim(self, incoming, length):
+                if incoming is None:
+                        return ""
+                
+                if len(incoming) > length:
+                        return incoming[:length - 3] + "..."
+
+                else:
+                        return incoming
+
+
+        '''
+                _send_req(method, url, data)
+
+                Arguments:
+                        method - The HTTP method, ie POST or GET.
+                        
+                        url - The URL to send the request.
+                        
+                        data - Data being sent, encoded with urllib.urlencode().
+
+                Returns:
+                        httplib.getresponse() object
+                
+                This method will send the request, through SSL, to Pushover using httplib. If the request
+                was sent successfully, it will return a httplib response object. If the request fails,
+                the method will return None.
+        '''
+        def _send_req(self, method, url, data):
+                try:
+                        conn = httplib.HTTPSConnection(URL['base'])
+
+                except:
+                        self._echo("Could not connect")
+
+                        return None
+
+                try:
+                        conn.request(method, url, data)
+
+                        return conn.getresponse()
+
+                except:
+                        self._echo("An error occured")
+
+                        return None
+
+
+        '''
+                send(device, sound, priority, title, message, url, url_title)
+
+                Arguments:
+                        device - A string value containg the name of the device you wish to notify.
+                        If left empty, the notification will be sent to all devices associated with the
+                        account. If a device is specified, and not found, the method will return false.
+
+                        sound - A string value of the notification sound you would like to use. If left
+                        blank, the default notification sound will be used. Use "none" to send a silent
+                        notification
+
+                        priority - An integer value that will change the notifications priority level.
+                        -1 is low priority, 0 is normal, 1 is high.
+
+                        title - A string value for the optional title.
+
+                        message - A string value for the notification message. This is required.
+
+                        url - A string value used to attach a link to the notification
+
+                        url_title - A string value used to give the previous mentioned link a human-readable
+                        text value, so instead of it showing up as "http://www.google.com" in the notification,
+                        it as "Google".
+
+                Returns:
+                        Boolean
+
+                This method is the where the message will be configured and sent to Pushover. The method first
+                verifies that the tokens provided are valid, checks if the device name given (if any) is
+                associated with the account, and then will proceed to send the request if no validation errors
+                have been established. If the request was accepted, the method will return True. 
+                        
+        '''                                           
+        def send(self, device = "", sound = "", priority = 0, title = "", message = "", url = "", url_title = ""):
+                ver_res = self._send_req('POST',
+                                         URL['vald'],
+                                         urllib.urlencode({
+                                                'token' : self.APP_TOKEN,
+                                                'user' : self.USER_TOKEN,
+                                                'device' : device
+                                        }))
+
+                if ver_res is not None:
+                        if json.loads(ver_res.read())['status'] == 1:
+                                if message is None:
+                                        self._echo("Must supply a notification message. Terminating request.")
+                                        return False
+                                
+                                send_res = self._send_req('POST',
+                                                          URL['send'],
+                                                          urllib.urlencode({
+                                                                'token' : self.APP_TOKEN,
+                                                                'user' : self.USER_TOKEN,
+                                                                'device' : device,
+                                                                'priority' : priority,
+                                                                'sound' : sound,
+                                                                'title' : self._trim(title, 50),
+                                                                'message' : self._trim(message, 512),
+                                                                'url' : url,
+                                                                'url_title' : self._trim(url_title, 50)
+                                                        }))
+
+                                if send_res is not None and send_res.status == 200:
+                                        if json.loads(send_res.read())['status'] == 1:
+                                                self._echo("Notification was sent successfully!")
+                                
+                                                return True
+                                        else:
+                                                self._echo("Notification was not sent. An error occured")
+
+                                                return False
+
+                                elif send_res.status == 429:
+                                        self._echo("Notification cap has been reached. Notification not sent.")
+
+                                        return False
+
+                        else:
+                                self._echo("Verification failed: Either the tokens supplied are invalid or the device requested has not been configured")
+
+                                return False
+                        
+                else:
+                        self._echo("An error occured when connecting to Pushover. Request terminated.")
+
+                        return False        
+
+
+if __name__ == "__main__":
+        from optparse import OptionParser
+        from sys import exit
+
+        parser = OptionParser(usage = "Usage: %prog [options]")
+
+        parser.add_option("-a", "--app-token",
+                          type = "string",
+                          dest = "app_token",
+                          help = "Pushover application token. Required.")
+
+        parser.add_option("-u", "--user-token",
+                          type = "string",
+                          dest = "user_token",
+                          help = "Pushover user token. Required.")
+
+        parser.add_option("-t", "--title",
+                          type = "string",
+                          dest = "title",
+                          default = "",
+                          help = "Optional notification title.")
+
+        parser.add_option("-m", "--message",
+                          type = "string",
+                          dest = "message",
+                          help = "Notification message. Required.")
+
+        parser.add_option("-d", "--device",
+                          type = "string",
+                          dest = "device",
+                          default = "",
+                          help = "Define which device the notification will be sent to. If the device is not found, or not\
+                                configured, the request will be terminated. Leaving blank will send to all devices associated\
+                                with the Pushover account.")
+
+        parser.add_option("-s", "--sound",
+                          type = "string",
+                          dest = "sound",
+                          default = "pushover",
+                          help = "Assign a sound to the notification. Leaving blank will result in Pushover using the \
+                                default sound and using 'none' will result in a 'silent' notification.")
+
+        parser.add_option("-p", "--priority",
+                          type = "int",
+                          dest = "priority",
+                          default = 0,
+                          help = "Set notification priority: -1 low priority, 0 normal priority, 1 high priority.")
+
+        parser.add_option("-l", "--link-url",
+                          type = "string",
+                          dest = "url",
+                          default = "",
+                          help = "Add a link to the notification.")
+
+        parser.add_option("-z", "--url-title",
+                          type = "string",
+                          dest = "url_title",
+                          default = "",
+                          help = "Assign a title to the link.")
+
+        parser.add_option("-e", "--echo",
+                          action = "store_true",
+                          dest = "echo",
+                          default = False,
+                          help = "Turn command line echo on.")
+
+        (options, args) = parser.parse_args()
+
+
+        if options.app_token is None or options.user_token is None:
+                print "Missing one or more tokens. Terminated."
+
+                exit()
+                
+
+        po = Pushover(options.app_token, options.user_token, options.echo)
+
+        print "Message to be sent: %s" % options.message
+
+        res = po.send(device = options.device,
+                      priority = options.priority,
+                      sound = options.sound,
+                      title = options.title,
+                      message = options.message,
+                      url = options.url,
+                      url_title = options.url_title)
+
+        if res:
+                print "Notification request was successful!"
+        else:
+                print "An error occured. Use the '--echo' flag and rerun the script for more information."
